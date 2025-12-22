@@ -14,6 +14,7 @@ import { PingMessage } from './messages/PingMessage.js'
 import type { WebSocket as NodeWebSocket } from 'ws'
 import type { Socket as TCPSocket } from 'net'
 import type SocketWrapper from './socket-wrapper.js'
+import type { NetSocketLike } from './react-native-tcp-adapter.js'
 
 import {
   LnWebSocketOptions,
@@ -51,7 +52,7 @@ class LnMessage {
   /**The WebSocket instance*/
   public socket: WebSocket | NodeWebSocket | null | SocketWrapper
   /**TCP socket instance*/
-  public tcpSocket?: TCPSocket
+  public tcpSocket?: TCPSocket | NetSocketLike
   /**
    * @deprecated Use connectionStatus$ instead
    */
@@ -608,3 +609,4 @@ class LnMessage {
 }
 
 export default LnMessage
+export { createReactNativeTcpSocket, type NetSocketLike } from './react-native-tcp-adapter.js'

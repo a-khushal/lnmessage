@@ -1,7 +1,9 @@
 import type { Socket } from 'net'
 import type { Buffer } from 'buffer'
+import type { NetSocketLike } from './react-native-tcp-adapter.js'
 
-//**Wraps a TCP socket with the WebSocket API */
+type CompatibleSocket = Socket | NetSocketLike
+
 class SocketWrapper {
   public onopen?: () => void
   public onclose?: () => void
@@ -10,7 +12,7 @@ class SocketWrapper {
   public send: (message: Buffer) => void
   public close: () => void
 
-  constructor(connection: string, socket: Socket) {
+  constructor(connection: string, socket: CompatibleSocket) {
     socket.on('connect', () => {
       this.onopen && this.onopen()
     })
@@ -21,15 +23,19 @@ class SocketWrapper {
     })
 
     socket.on('error', (error) => {
-      this.onerror && this.onerror(error)
+      this.onerror && this.onerror({ message: error?.message || String(error) })
     })
 
-    socket.on('data', (data) => {
-      this.onmessage && this.onmessage({ data })
+    socket.on('data', (data: Buffer) => {
+      const arrayBuffer = data.buffer.slice(
+        data.byteOffset,
+        data.byteOffset + data.byteLength
+      ) as ArrayBuffer
+      this.onmessage && this.onmessage({ data: arrayBuffer })
     })
 
     this.send = (message: Buffer) => {
-      socket.write(message)
+      socket.write(message as any)
     }
 
     this.close = () => {

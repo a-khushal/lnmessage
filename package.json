@@ -30,5 +30,8 @@
     "buffer": "^6.0.3",
     "rxjs": "^7.5.7",
     "ws": "^8.13.0"
+  },
+  "peerDependencies": {
+    "react-native-tcp-socket": "^6.0.0"
   }
 }

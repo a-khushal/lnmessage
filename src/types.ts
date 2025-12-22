@@ -1,5 +1,6 @@
 import type { Buffer } from 'buffer'
 import type { Socket as TCPSocket } from 'net'
+import type { NetSocketLike } from './react-native-tcp-adapter.js'
 
 export type LnWebSocketOptions = {
   /**
@@ -27,7 +28,7 @@ export type LnWebSocketOptions = {
    */
   wsProtocol?: 'ws:' | 'wss:'
   /**In nodejs or react native you can connect directly via a TCP socket */
-  tcpSocket?: TCPSocket
+  tcpSocket?: TCPSocket | NetSocketLike
   /**
    * 32 byte hex encoded private key to be used as the local node secret.
    * Use this to ensure a consistent local node identity across connection sessions

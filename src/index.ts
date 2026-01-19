@@ -92,6 +92,8 @@ class LnMessage {
   private _l: number | null
   private _pingTimeout: NodeJS.Timeout | null
   private _pongTimeout: NodeJS.Timeout | null
+  private _ip: string
+  private _port: number
 
   constructor(options: LnWebSocketOptions) {
     validateInit(options)
@@ -124,6 +126,8 @@ class LnMessage {
     this.connecting = false
     this.Buffer = Buffer
     this.tcpSocket = tcpSocket
+    this._ip = ip
+    this._port = port
 
     this._handshakeState = HANDSHAKE_STATE.INITIATOR_INITIATING
     this._decryptedMsgs$ = new Subject()
@@ -172,7 +176,7 @@ class LnMessage {
     this._attemptReconnect = attemptReconnect
 
     this.socket = this.tcpSocket
-      ? new (await import('./socket-wrapper.js')).default(this.wsUrl, this.tcpSocket)
+      ? new (await import('./socket-wrapper.js')).default({ ip: this._ip, port: this._port }, this.tcpSocket)
       : typeof globalThis.WebSocket === 'undefined'
       ? new (await import('ws')).default(this.wsUrl)
       : new globalThis.WebSocket(this.wsUrl)

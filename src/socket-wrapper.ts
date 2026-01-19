@@ -12,7 +12,7 @@ class SocketWrapper {
   public send: (message: Buffer) => void
   public close: () => void
 
-  constructor(connection: string, socket: CompatibleSocket) {
+  constructor(connection: string | { ip: string; port: number }, socket: CompatibleSocket) {
     socket.on('connect', () => {
       this.onopen && this.onopen()
     })
@@ -42,11 +42,36 @@ class SocketWrapper {
       socket.end()
     }
 
-    const url = new URL(connection)
-    const { host } = url
-    const [nodeIP, port] = host.split(':')
+    let nodeIP: string
+    let port: number
 
-    socket.connect(parseInt(port), nodeIP)
+    if (typeof connection === 'string') {
+      try {
+        const url = new URL(connection)
+        const host = url.host || url.hostname
+        if (host.includes(':')) {
+          const [ip, portStr] = host.split(':')
+          nodeIP = ip
+          port = parseInt(portStr, 10)
+        } else {
+          nodeIP = host
+          port = parseInt(url.port || '9735', 10)
+        }
+      } catch {
+        const parts = connection.split(':')
+        if (parts.length === 2) {
+          nodeIP = parts[0]
+          port = parseInt(parts[1], 10)
+        } else {
+          throw new Error(`Invalid connection string: ${connection}`)
+        }
+      }
+    } else {
+      nodeIP = connection.ip
+      port = connection.port
+    }
+
+    socket.connect(port, nodeIP)
   }
 }
 

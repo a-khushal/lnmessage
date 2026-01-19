@@ -76,26 +76,16 @@ export function createReactNativeTcpSocket(
   const socketAdapter: NetSocketLike = {
     connect(port: number, host: string, callback?: () => void): void {
       if (socketInstance) {
-        // Already connected or connecting
-        console.log('[TCP Adapter] Already connected or connecting, skipping')
         return
       }
-
-      console.log(`[TCP Adapter] Attempting to connect to ${host}:${port}`)
 
       try {
         // Create the react-native-tcp-socket connection
         // react-native-tcp-socket uses createConnection with options object
         socketInstance = TcpSocketModule.createConnection({ host, port }, () => {
-          console.log(`[TCP Adapter] Connection successful to ${host}:${port}`)
-          console.log(`[TCP Adapter] Pending listeners count: ${pendingListeners.length}`)
-          // Attach any pending listeners that were registered before connect
           const connectListeners: Array<() => void> = []
           pendingListeners.forEach(({ event, listener }) => {
-            console.log(`[TCP Adapter] Processing pending listener for event: ${String(event)}`)
             if (event === 'connect') {
-              // Store connect listeners to call them manually
-              console.log(`[TCP Adapter] Found connect listener, storing it`)
               connectListeners.push(listener as () => void)
             } else {
               socketInstance!.on(event, listener as any)
@@ -106,19 +96,8 @@ export function createReactNativeTcpSocket(
           // Mark as connected
           isConnected = true
 
-          // Manually trigger connect event listeners
-          // react-native-tcp-socket doesn't emit 'connect' event, only calls callback
-          console.log(`[TCP Adapter] Triggering ${connectListeners.length} connect listeners`)
-          if (connectListeners.length === 0) {
-            console.warn(
-              `[TCP Adapter] WARNING: No connect listeners found! This might cause the connection to hang.`
-            )
-          }
-          connectListeners.forEach((listener, index) => {
+          connectListeners.forEach((listener) => {
             try {
-              console.log(
-                `[TCP Adapter] Calling connect listener ${index + 1}/${connectListeners.length}`
-              )
               listener()
             } catch (error) {
               console.error(`[TCP Adapter] Error in connect listener:`, error)
@@ -134,16 +113,11 @@ export function createReactNativeTcpSocket(
         // Add error listener immediately after creating socket
         socketInstance.on('error', (error: Error) => {
           console.error(`[TCP Adapter] Connection error to ${host}:${port}:`, error)
-          console.error(`[TCP Adapter] Error message:`, error?.message)
-          console.error(`[TCP Adapter] Error stack:`, error?.stack)
         })
 
         socketInstance.on('close', () => {
-          console.log(`[TCP Adapter] Connection closed to ${host}:${port}`)
+          isConnected = false
         })
-
-        // Forward all EventEmitter methods to the underlying socket instance
-        // The react-native-tcp-socket instance already has EventEmitter methods
       } catch (error) {
         console.error(`[TCP Adapter] Failed to create connection to ${host}:${port}:`, error)
         throw error
@@ -190,27 +164,15 @@ export function createReactNativeTcpSocket(
 
     // Forward EventEmitter methods to the underlying socket instance
     on(event: string | symbol, listener: (...args: any[]) => void): NetSocketLike {
-      console.log(
-        `[TCP Adapter] on() called for event: ${String(
-          event
-        )}, socketInstance: ${!!socketInstance}, isConnected: ${isConnected}`
-      )
-      // If socket is already created and connected, handle connect listeners specially
       if (socketInstance && isConnected && event === 'connect') {
-        // If already connected, call the listener immediately
-        console.log(`[TCP Adapter] Socket already connected, calling connect listener immediately`)
         try {
           ;(listener as () => void)()
         } catch (error) {
           console.error(`[TCP Adapter] Error in connect listener:`, error)
         }
       } else if (socketInstance) {
-        // Socket exists, forward to it
-        console.log(`[TCP Adapter] Forwarding listener to socketInstance`)
         socketInstance.on(event, listener as any)
       } else {
-        // Store listener to attach when socket is created
-        console.log(`[TCP Adapter] Storing listener in pendingListeners (event: ${String(event)})`)
         pendingListeners.push({ event, listener })
       }
       return socketAdapter

@@ -74,14 +74,14 @@ export class NoiseState {
    * Nonce incremented when receiving messages. Initialized to zero in Act3.
    */
   public rn: Buffer
-  /**
-   * Chaining key for sending. Initialized to ck in Act 3.
-   */
-  public sck: Buffer
-  /**
-   * Chaining key for receiving. Initialized to ck in Act 3.
-   */
-  public rck: Buffer
+  /**  
+  * Chaining key for sending. Initialized to ck in Act 3.	
+  */	
+  public sck: Buffer;
+  /**	
+  * Chaining key for receiving. Initialized to ck in Act 3.	
+  */	
+  public rck: Buffer;
   /**
    * Intermediate key 1. Used to encrypt or decrypt the zero-length AEAD
    * payload in the corresponding initiator or receiver act.

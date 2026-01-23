@@ -13,7 +13,7 @@ import { PongMessage } from './messages/PongMessage.js'
 import { PingMessage } from './messages/PingMessage.js'
 import type { WebSocket as NodeWebSocket } from 'ws'
 import type { Socket as TCPSocket } from 'net'
-import type SocketWrapper from './socket-wrapper.js'
+import SocketWrapper from './socket-wrapper.js'
 import type { NetSocketLike } from './react-native-tcp-adapter.js'
 
 import {
@@ -175,11 +175,14 @@ class LnMessage {
     this.connectionStatus$.next('connecting')
     this._attemptReconnect = attemptReconnect
 
-    this.socket = this.tcpSocket
-      ? new (await import('./socket-wrapper.js')).default({ ip: this._ip, port: this._port }, this.tcpSocket)
-      : typeof globalThis.WebSocket === 'undefined'
-      ? new (await import('ws')).default(this.wsUrl)
-      : new globalThis.WebSocket(this.wsUrl)
+    if (this.tcpSocket) {
+      this.socket = new SocketWrapper({ ip: this._ip, port: this._port }, this.tcpSocket)
+    } else if (typeof globalThis.WebSocket === 'undefined') {
+      const { default: WebSocket } = await import('ws')
+      this.socket = new WebSocket(this.wsUrl)
+    } else {
+      this.socket = new globalThis.WebSocket(this.wsUrl)
+    }
 
     if ((this.socket as WebSocket | NodeWebSocket).binaryType) {
       ;(this.socket as WebSocket | NodeWebSocket).binaryType = 'arraybuffer'

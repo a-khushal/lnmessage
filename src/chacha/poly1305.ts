@@ -1,5 +1,14 @@
 import { Buffer } from 'buffer'
 
+function readU16LE(buf: Uint8Array, offset: number): number {
+  return buf[offset] | (buf[offset + 1] << 8)
+}
+
+function writeU16LE(buf: Uint8Array, offset: number, value: number) {
+  buf[offset] = value & 0xff
+  buf[offset + 1] = (value >>> 8) & 0xff
+}
+
 class Poly1305 {
   public buffer: Buffer
   public leftover: number
@@ -19,7 +28,7 @@ class Poly1305 {
     let t = new Uint16Array(8),
       i
 
-    for (i = 8; i--; ) t[i] = key.readUInt16LE(i * 2)
+    for (i = 8; i--; ) t[i] = readU16LE(key, i * 2)
 
     this.r[0] = t[0] & 0x1fff
     this.r[1] = ((t[0] >>> 13) | (t[1] << 3)) & 0x1fff
@@ -34,7 +43,7 @@ class Poly1305 {
 
     for (i = 8; i--; ) {
       this.h[i] = 0
-      this.pad[i] = key.readUInt16LE(16 + 2 * i)
+      this.pad[i] = readU16LE(key, 16 + 2 * i)
     }
     this.h[8] = 0
     this.h[9] = 0
@@ -51,7 +60,7 @@ class Poly1305 {
       j = 0
 
     while (bytes >= 16) {
-      for (i = 8; i--; ) t[i] = m.readUInt16LE(i * 2 + mpos)
+      for (i = 8; i--; ) t[i] = readU16LE(m, i * 2 + mpos)
 
       this.h[0] += t[0] & 0x1fff
       this.h[1] += ((t[0] >>> 13) | (t[1] << 3)) & 0x1fff
@@ -191,7 +200,7 @@ class Poly1305 {
     }
 
     for (i = 8; i--; ) {
-      mac.writeUInt16LE(this.h[i], i * 2)
+      writeU16LE(mac, i * 2, this.h[i])
       this.pad[i] = 0
     }
     for (i = 10; i--; ) {

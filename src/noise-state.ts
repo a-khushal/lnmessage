@@ -2,6 +2,19 @@ import { Buffer } from 'buffer'
 import { ccpDecrypt, ccpEncrypt, ecdh, getPublicKey, hkdf, sha256 } from './crypto.js'
 import type { NoiseStateOptions } from './types.js'
 
+function readU16LE(buf: Uint8Array, offset: number): number {
+  return buf[offset] | (buf[offset + 1] << 8)
+}
+
+function writeU16LE(buf: Uint8Array, offset: number, value: number) {
+  buf[offset] = value & 0xff
+  buf[offset + 1] = (value >>> 8) & 0xff
+}
+
+function readU16BE(buf: Uint8Array, offset: number): number {
+  return (buf[offset] << 8) | buf[offset + 1]
+}
+
 export class NoiseState {
   /**
    * The official protocol name for the Lightning variant of Noise. This
@@ -74,14 +87,14 @@ export class NoiseState {
    * Nonce incremented when receiving messages. Initialized to zero in Act3.
    */
   public rn: Buffer
-  /**  
-  * Chaining key for sending. Initialized to ck in Act 3.	
-  */	
-  public sck: Buffer;
-  /**	
-  * Chaining key for receiving. Initialized to ck in Act 3.	
-  */	
-  public rck: Buffer;
+  /**
+  * Chaining key for sending. Initialized to ck in Act 3.
+  */
+  public sck: Buffer
+  /**
+  * Chaining key for receiving. Initialized to ck in Act 3.
+  */
+  public rck: Buffer
   /**
    * Intermediate key 1. Used to encrypt or decrypt the zero-length AEAD
    * payload in the corresponding initiator or receiver act.
@@ -127,7 +140,7 @@ export class NoiseState {
 
     // 4. ck, temp_k1 = HKDF(ck, es)
     const tempK1 = hkdf(ss, 64, this.ck)
-    this.ck = tempK1.subarray(0, 32)
+    this.ck = Buffer.from(tempK1.subarray(0, 32))
     this.tempK1 = Buffer.from(tempK1.subarray(32))
 
     // 5. c = encryptWithAD(temp_k1, 0, h, zero)
@@ -163,8 +176,8 @@ export class NoiseState {
     const ss = ecdh(this.repk, this.es)
     // 6. ck, temp_k2 = HKDF(cd, ss)
     const tempK2 = hkdf(ss, 64, this.ck)
-    this.ck = tempK2.subarray(0, 32)
-    this.tempK2 = tempK2.subarray(32)
+    this.ck = Buffer.from(tempK2.subarray(0, 32))
+    this.tempK2 = Buffer.from(tempK2.subarray(32))
     // 7. p = decryptWithAD()
     ccpDecrypt(this.tempK2, Buffer.alloc(12), this.h, c)
     // 8. h = sha256(h || c)
@@ -190,15 +203,15 @@ export class NoiseState {
     const ss = ecdh(this.repk, this.ls)
     // 4. ck, temp_k3 = HKDF(ck, ss)
     const tempK3 = hkdf(ss, 64, this.ck)
-    this.ck = tempK3.subarray(0, 32)
+    this.ck = Buffer.from(tempK3.subarray(0, 32))
     this.tempK3 = Buffer.from(tempK3.subarray(32))
     this.rck = this.sck = this.ck
     // 5. t = encryptWithAD(temp_k3, 0, h, zero)
     const t = ccpEncrypt(this.tempK3, Buffer.alloc(12), this.h, Buffer.alloc(0))
     // 6. sk, rk = hkdf(ck, zero)
     const sk = hkdf(Buffer.alloc(0), 64, this.ck)
-    this.rk = sk.subarray(32)
-    this.sk = sk.subarray(0, 32)
+    this.rk = Buffer.from(sk.subarray(32))
+    this.sk = Buffer.from(sk.subarray(0, 32))
     // 7. rn = 0, sn = 0
     this.sn = Buffer.alloc(12)
     this.rn = Buffer.alloc(12)
@@ -228,8 +241,8 @@ export class NoiseState {
     const ss = ecdh(re, this.ls)
     // 6. ck, temp_k1 = HKDF(cd, ss)
     const tempK1 = hkdf(ss, 64, this.ck)
-    this.ck = tempK1.subarray(0, 32)
-    this.tempK1 = tempK1.subarray(32)
+    this.ck = Buffer.from(tempK1.subarray(0, 32))
+    this.tempK1 = Buffer.from(tempK1.subarray(32))
     // 7. p = decryptWithAD(temp_k1, 0, h, c)
     ccpDecrypt(this.tempK1, Buffer.alloc(12), this.h, c)
     // 8. h = sha256(h || c)
@@ -247,7 +260,7 @@ export class NoiseState {
     const ss = ecdh(this.repk, this.es)
     // 4. ck, temp_k2 = hkdf(ck, ss)
     const tempK2 = hkdf(ss, 64, this.ck)
-    this.ck = tempK2.subarray(0, 32)
+    this.ck = Buffer.from(tempK2.subarray(0, 32))
     this.tempK2 = Buffer.from(tempK2.subarray(32))
     // 5. c = encryptWithAd(temp_k2, 0, h, zero)
     const c = ccpEncrypt(this.tempK2, Buffer.alloc(12), this.h, Buffer.alloc(0))
@@ -281,14 +294,14 @@ export class NoiseState {
     const ss = ecdh(this.rpk, this.es)
     // 7. ck, temp_k3 = hkdf(cs, ss)
     const tempK3 = hkdf(ss, 64, this.ck)
-    this.ck = tempK3.subarray(0, 32)
-    this.tempK3 = tempK3.subarray(32)
+    this.ck = Buffer.from(tempK3.subarray(0, 32))
+    this.tempK3 = Buffer.from(tempK3.subarray(32))
     // 8. p = decryptWithAD(temp_k3, 0, h, t)
     ccpDecrypt(this.tempK3, Buffer.alloc(12), this.h, t)
     // 9. rk, sk = hkdf(ck, zero)
     const sk = hkdf(Buffer.alloc(0), 64, this.ck)
-    this.rk = sk.subarray(0, 32)
-    this.sk = sk.subarray(32)
+    this.rk = Buffer.from(sk.subarray(0, 32))
+    this.sk = Buffer.from(sk.subarray(32))
     // 10. rn = 0, sn = 0
     this.rn = Buffer.alloc(12)
     this.sn = Buffer.alloc(12)
@@ -319,15 +332,17 @@ export class NoiseState {
    * The receiving key is rotated every 1000 messages.
    */
   public decryptLength(lc: Buffer): number {
+    if (!this.rk || !this.rn) throw new Error('Noise receiving state is not initialized')
     const l = ccpDecrypt(this.rk, this.rn, Buffer.alloc(0), lc) as Buffer
     if (this._incrementRecievingNonce() >= 1000) this._rotateRecievingKeys()
-    return l.readUInt16BE(0)
+    return readU16BE(l, 0)
   }
   /**
    * Decrypts the message using the receiving key and nonce. The receiving
    * key is rotated every 1000 messages.
    */
   public decryptMessage(c: Buffer) {
+    if (!this.rk || !this.rn) throw new Error('Noise receiving state is not initialized')
     const m = ccpDecrypt(this.rk, this.rn, Buffer.alloc(0), c)
     if (this._incrementRecievingNonce() >= 1000) this._rotateRecievingKeys()
     return m as Buffer
@@ -351,28 +366,28 @@ export class NoiseState {
   }
 
   private _incrementSendingNonce() {
-    const newValue = this.sn.readUInt16LE(4) + 1
-    this.sn.writeUInt16LE(newValue, 4)
+    const newValue = readU16LE(this.sn, 4) + 1
+    writeU16LE(this.sn, 4, newValue)
     return newValue
   }
 
   private _incrementRecievingNonce() {
-    const newValue = this.rn.readUInt16LE(4) + 1
-    this.rn.writeUInt16LE(newValue, 4)
+    const newValue = readU16LE(this.rn, 4) + 1
+    writeU16LE(this.rn, 4, newValue)
     return newValue
   }
 
   private _rotateSendingKeys() {
     const result = hkdf(this.sk, 64, this.sck)
-    this.sk = result.subarray(32)
-    this.sck = result.subarray(0, 32)
+    this.sk = Buffer.from(result.subarray(32))
+    this.sck = Buffer.from(result.subarray(0, 32))
     this.sn = Buffer.alloc(12)
   }
 
   private _rotateRecievingKeys() {
     const result = hkdf(this.rk, 64, this.rck)
-    this.rk = result.subarray(32)
-    this.rck = result.subarray(0, 32)
+    this.rk = Buffer.from(result.subarray(32))
+    this.rck = Buffer.from(result.subarray(0, 32))
     this.rn = Buffer.alloc(12)
   }
 }

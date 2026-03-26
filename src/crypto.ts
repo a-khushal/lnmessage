@@ -5,6 +5,10 @@ import { hmac } from '@noble/hashes/hmac'
 import { sha256 as sha256Array } from '@noble/hashes/sha256'
 import { bytesToHex, randomBytes } from '@noble/hashes/utils'
 
+function toBuffer(value: Buffer | Uint8Array): Buffer {
+  return Buffer.isBuffer(value) ? value : Buffer.from(value)
+}
+
 export function sha256(input: Uint8Array): Buffer {
   return Buffer.from(sha256Array(input))
 }
@@ -33,7 +37,7 @@ export function hkdf(ikm: Buffer, len: number, salt = Buffer.alloc(0), info = Bu
     t.push(hmacHash(prk, Buffer.concat([tp, info, bi])))
   }
 
-  return Buffer.concat(t.slice(1)).subarray(0, len)
+  return Buffer.from(Buffer.concat(t.slice(1)).subarray(0, len))
 }
 
 export function getPublicKey(privKey: Buffer, compressed = true) {
@@ -51,10 +55,10 @@ export function getPublicKey(privKey: Buffer, compressed = true) {
  * @returns encrypted data + tag as a variable length buffer
  */
 export function ccpEncrypt(k: Buffer, n: Buffer, ad: Buffer, plaintext: Buffer): Buffer {
-  const cipher = createCipher(k, n)
-  cipher.setAAD(ad)
+  const cipher = createCipher(toBuffer(k), toBuffer(n))
+  cipher.setAAD(toBuffer(ad))
 
-  const pad = cipher.update(plaintext) as Buffer
+  const pad = cipher.update(toBuffer(plaintext)) as Buffer
 
   cipher.final && cipher.final()
   const tag = cipher.getAuthTag()
@@ -72,24 +76,27 @@ export function ccpEncrypt(k: Buffer, n: Buffer, ad: Buffer, plaintext: Buffer):
  * @returns decrypteed data as a variable length Buffer
  */
 export function ccpDecrypt(k: Buffer, n: Buffer, ad: Buffer, ciphertext: Buffer) {
-  const decipher = createDecipher(k, n)
+  const decipher = createDecipher(toBuffer(k), toBuffer(n))
+  const data = toBuffer(ciphertext)
 
-  decipher.setAAD(ad)
+  decipher.setAAD(toBuffer(ad))
 
-  if (ciphertext.length === 16) {
-    decipher.setAuthTag(ciphertext)
+  if (data.length === 16) {
+    decipher.setAuthTag(data)
     return decipher.final()
   }
 
-  if (ciphertext.length > 16) {
-    const tag = ciphertext.subarray(ciphertext.length - 16)
-    const pad = ciphertext.subarray(0, ciphertext.length - 16)
+  if (data.length > 16) {
+    const tag = data.subarray(data.length - 16)
+    const pad = data.subarray(0, data.length - 16)
     decipher.setAuthTag(tag)
     let m = decipher.update(pad)
     const f = decipher.final()
     m = Buffer.concat([m as Buffer, f as Buffer])
     return m
   }
+
+  throw new Error(`Invalid ciphertext length: ${data.length}`)
 }
 
 export function createRandomPrivateKey(): string {

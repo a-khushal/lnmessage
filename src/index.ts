@@ -9,6 +9,7 @@ import { deserialize } from './messages/MessageFactory.js'
 import { IWireMessage } from './messages/IWireMessage.js'
 import { BufferReader, BufferWriter } from './messages/buf.js'
 import { CommandoMessage } from './messages/CommandoMessage.js'
+import { InitMessage } from './messages/InitMessage.js'
 import { PongMessage } from './messages/PongMessage.js'
 import { PingMessage } from './messages/PingMessage.js'
 import type { WebSocket as NodeWebSocket } from 'ws'
@@ -94,6 +95,8 @@ class LnMessage {
   private _pongTimeout: NodeJS.Timeout | null
   private _ip: string
   private _port: number
+  private _initSent: boolean
+  private _disconnecting: boolean
 
   constructor(options: LnWebSocketOptions) {
     validateInit(options)
@@ -145,6 +148,8 @@ class LnMessage {
     this._l = null
     this._pingTimeout = null
     this._pongTimeout = null
+    this._initSent = false
+    this._disconnecting = false
 
     this.decryptedMsgs$.subscribe((msg) => {
       this.handleDecryptedMessage(msg)
@@ -189,6 +194,7 @@ class LnMessage {
     }
 
     this.socket.onopen = async () => {
+      this._disconnecting = false
       this._log('info', 'WebSocket is connected at ' + new Date().toISOString())
       this._log('info', 'Creating Act1 message')
 
@@ -200,10 +206,10 @@ class LnMessage {
         this._handshakeState = HANDSHAKE_STATE.AWAITING_RESPONDER_REPLY
       }
 
-      this._pingTimeout = setTimeout(this._sendPingMessage.bind(this), 45 * 1000)
     }
 
     this.socket.onclose = async () => {
+      this._disconnecting = false
       this._log('error', 'WebSocket is closed at ' + new Date().toISOString())
       this._pingTimeout && clearTimeout(this._pingTimeout)
       this._pongTimeout && clearTimeout(this._pongTimeout)
@@ -256,14 +262,44 @@ class LnMessage {
   }
 
   private _close() {
+    if (this._disconnecting) return
+    this._disconnecting = true
     this._log('error', 'Closing connection')
 
     this.socket?.close()
   }
 
-  private queueMessage(event: { data: ArrayBuffer }) {
+  private queueMessage(event: { data: ArrayBuffer | ArrayBufferView | string | Blob | Buffer }) {
+    if (this._disconnecting || (this.connectionStatus$.value === 'disconnected' && !this.connecting)) {
+      return
+    }
+
     const { data } = event
-    const message = Buffer.from(data)
+
+    // Normalize websocket payloads across Node/RN runtimes.
+    // RN can surface binary frames as ArrayBuffer, typed arrays, Blob or base64 strings.
+    if (typeof Blob !== 'undefined' && data instanceof Blob) {
+      data
+        .arrayBuffer()
+        .then((buffer) => this.queueMessage({ data: buffer }))
+        .catch((err) => this._log('error', `Failed to read Blob message: ${String(err)}`))
+      return
+    }
+
+    let message: Buffer
+    if (typeof data === 'string') {
+      // Most websocket proxies provide base64 strings for binary payloads.
+      message = Buffer.from(data, 'base64')
+    } else if (Buffer.isBuffer(data)) {
+      message = data
+    } else if (ArrayBuffer.isView(data)) {
+      message = Buffer.from(data.buffer, data.byteOffset, data.byteLength)
+    } else if (data instanceof ArrayBuffer) {
+      message = Buffer.from(data)
+    } else {
+      this._log('error', `Unsupported websocket payload type: ${typeof data}`)
+      return
+    }
 
     const currentData =
       this._messageBuffer && !this._messageBuffer.eof && this._messageBuffer.readBytes()
@@ -288,6 +324,11 @@ class LnMessage {
     })
 
     this._attemptReconnect = false
+    this._initSent = false
+    this._handshakeState = HANDSHAKE_STATE.INITIATOR_INITIATING
+    this._readState = READ_STATE.READY_FOR_LEN
+    this._l = null
+    this._messageBuffer = new BufferReader(Buffer.from(''))
     this._pingTimeout && clearTimeout(this._pingTimeout)
     this._pongTimeout && clearTimeout(this._pongTimeout)
     this._close()
@@ -330,7 +371,9 @@ class LnMessage {
       // Terminate on failures as we won't be able to recover
       // since the noise state has rotated nonce and we won't
       // be able to any more data without additional errors.
-      this._log('error', `Noise state has rotated nonce: ${err}`)
+      const errorMessage =
+        err instanceof Error ? `${err.name}: ${err.message}\n${err.stack || ''}` : String(err)
+      this._log('error', `Noise state has rotated nonce: ${errorMessage}`)
       this.disconnect()
     }
 
@@ -357,6 +400,7 @@ class LnMessage {
       this._log('info', 'Sending reply for act3')
       // send final handshake
       this.socket.send(reply)
+      this._sendInitMessage()
 
       // transition
       this._handshakeState = HANDSHAKE_STATE.READY
@@ -392,14 +436,15 @@ class LnMessage {
       // return true to continue reading
       return true
     } catch (err) {
-      return false
+      if (err instanceof RangeError) return false
+      throw err
     }
   }
 
   private _processPacketBody() {
     const MESSAGE_MAC_BYTES = 16
 
-    if (!this._l) return false
+    if (this._l === null) return false
 
     try {
       // With the length, we can attempt to read the message plus
@@ -425,7 +470,8 @@ class LnMessage {
 
       return true
     } catch (err) {
-      return false
+      if (err instanceof RangeError) return false
+      throw err
     }
   }
 
@@ -433,42 +479,53 @@ class LnMessage {
     // reset ping and pong timeout
     this._pongTimeout && clearTimeout(this._pongTimeout)
     this._pingTimeout && clearTimeout(this._pingTimeout)
-    this._pingTimeout = setTimeout(this._sendPingMessage.bind(this), 40 * 1000)
+    if (this.connectionStatus$.value === 'connected') {
+      this._pingTimeout = setTimeout(this._sendPingMessage.bind(this), 40 * 1000)
+    }
 
     try {
       const reader = new BufferReader(decrypted)
       const type = reader.readUInt16BE()
       const [typeName] = Object.entries(MessageType).find(([name, val]) => val === type) || []
-      const requestId = reader.readBytes(8).toString('hex')
-      const message = reader.readBytes()
 
       this._log('info', `Received message type is: ${typeName || 'unknown'}`)
 
-      if (type === MessageType.CommandoResponseContinues) {
-        this._log(
-          'info',
-          'Received a partial commando message, caching it to join with other parts'
-        )
+      // Lightning wire messages such as Init/Ping/Pong only contain the 2-byte
+      // type prefix. Commando responses add an 8-byte request id immediately
+      // after the type, so only parse that extra field for commando messages.
+      if (
+        type === MessageType.CommandoResponseContinues ||
+        type === MessageType.CommandoResponse
+      ) {
+        const requestId = reader.readBytes(8).toString('hex')
+        const message = reader.readBytes()
 
-        this._partialCommandoMsgs[requestId] = this._partialCommandoMsgs[requestId]
-          ? Buffer.concat([
-              this._partialCommandoMsgs[requestId],
-              message.subarray(0, message.byteLength - 16)
-            ])
-          : decrypted.subarray(0, decrypted.length - 16)
+        if (type === MessageType.CommandoResponseContinues) {
+          this._log(
+            'info',
+            'Received a partial commando message, caching it to join with other parts'
+          )
 
-        return
-      }
+          this._partialCommandoMsgs[requestId] = this._partialCommandoMsgs[requestId]
+            ? Buffer.concat([
+                this._partialCommandoMsgs[requestId],
+                message.subarray(0, message.byteLength - 16)
+              ])
+            : decrypted.subarray(0, decrypted.length - 16)
 
-      if (type === MessageType.CommandoResponse && this._partialCommandoMsgs[requestId]) {
-        this._log(
-          'info',
-          'Received a final commando msg and we have a partial message to join it to. Joining now'
-        )
+          return
+        }
 
-        // join commando msg chunks
-        decrypted = Buffer.concat([this._partialCommandoMsgs[requestId], message])
-        delete this._partialCommandoMsgs[requestId]
+        if (this._partialCommandoMsgs[requestId]) {
+          this._log(
+            'info',
+            'Received a final commando msg and we have a partial message to join it to. Joining now'
+          )
+
+          // join commando msg chunks
+          decrypted = Buffer.concat([this._partialCommandoMsgs[requestId], message])
+          delete this._partialCommandoMsgs[requestId]
+        }
       }
 
       // deserialise
@@ -477,20 +534,24 @@ class LnMessage {
 
       switch (payload.type) {
         case MessageType.Init: {
-          this._log('info', 'Constructing Init message reply')
-          const reply = this.noise.encryptMessage((payload as IWireMessage).serialize())
+          if (!this._initSent) {
+            this._log('info', 'Constructing Init message reply')
+            const reply = this.noise.encryptMessage((payload as IWireMessage).serialize())
 
-          if (this.socket) {
-            this._log('info', 'Sending Init message reply')
-            this.socket.send(reply)
-
-            this._log('info', 'Connected and ready to send messages!')
-
-            this.connectionStatus$.next('connected')
-            this.connected$.next(true)
-            this.connecting = false
-            this._attemptedReconnects = 0
+            if (this.socket) {
+              this._log('info', 'Sending Init message reply')
+              this.socket.send(reply)
+              this._initSent = true
+            }
           }
+
+          this._log('info', 'Connected and ready to send messages!')
+
+          this.connectionStatus$.next('connected')
+          this.connected$.next(true)
+          this.connecting = false
+          this._attemptedReconnects = 0
+          this._pingTimeout = setTimeout(this._sendPingMessage.bind(this), 40 * 1000)
 
           break
         }
@@ -519,6 +580,17 @@ class LnMessage {
     } catch (error) {
       this._log('error', `Error handling incoming message: ${(error as Error).message}`)
     }
+  }
+
+  private _sendInitMessage() {
+    if (!this.socket || this._initSent) return
+
+    this._log('info', 'Constructing Init message')
+    const init = this.noise.encryptMessage(new InitMessage().serialize())
+
+    this._log('info', 'Sending Init message')
+    this.socket.send(init)
+    this._initSent = true
   }
 
   async commando({
